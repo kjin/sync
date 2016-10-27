@@ -35,6 +35,8 @@ var sync = {
     endsWith: require('underscore.string').endsWith,
     // read users input, for command line
     readline: require('readline'),
+    // Uses git check-ignore to see if a file is gitignored
+    git_filter: require('./git-filter'),
     // when was the last time script checked changes
     lastRun: +(new Date()),
     // how many seconds it took to start checking again
@@ -49,7 +51,7 @@ var sync = {
     getConfig: function(){
         // Check the existance of the config file
         try{
-            this.config = require("./config.json");
+            this.config = require(process.argv[2]);
         }catch(e){
             console.log(this.clc.red('Please create a config file by copying the config_example.json'));
             process.exit(1);
@@ -246,7 +248,7 @@ var sync = {
                     if(arg1 == "-u"){
                         this.write('Finding all changed files while waiting.\n');
                     }
-                    this.startChecking();
+                    this.startChecking('updated');
                 }else{
                     this.write('Already running\n');
                 }
@@ -267,7 +269,7 @@ var sync = {
      * Creates a master SSH connection, keeps the connection open
      * so `scp` commands work faster by sharing the same persisten connection
      */
-    createMasterConection: function(){
+    createMasterConection: function(mode){
         var self = this;
         // Show starting text
         this.write('Connecting.');
@@ -297,7 +299,7 @@ var sync = {
                 self.printTitle();
 
                 // Start Checking changes
-                self.startChecking();
+                self.startChecking(mode);
             }
         });
     },
@@ -305,9 +307,9 @@ var sync = {
      * Start checking changes, since we don't use setInterval
      * this function is called for starting each loop
      */
-    startChecking: function(){
+    startChecking: function(mode){
         // calculate the last time it run, so we can check back to that point and get the changes while file was uploaded
-        this.timeDiff = (+(new Date()) - this.lastRun) / 1000;
+        this.timeDiff = (+(new Date()) - (mode === 'updated' ? this.lastRun : 0)) / 1000;
         this.lastRun = +(new Date());
         if (this.paused){
             this.printTitle();
@@ -361,28 +363,31 @@ var sync = {
                 this.cfIndex = 0;
                 // Get only the files that are changed from the last time we checked
                 this.cf = this.getChangedFiles(lines);
-                // If there are changed files
-                if(this.cf.length > 0){
-                    // Clear the screen
-                    this.printTitle();
-                    if(this.config.visorSupport){
-                        this.exec("osascript -e 'set prev_ to name of (info for (path to frontmost application))' " +
-                                            "-e 'tell application \"Terminal\" to activate' " +
-                                            "-e 'delay 1' " +
-                                            "-e 'tell application prev_ to activate'");
-                    }
-                    // Display how many files were changed
-                    var message = this.cf.length + ' file'+(this.cf.length>1? 's':'')+' changed.' + '\n';
-                    this.write(message);
-                    this.showNotification(message);
+                this.git_filter.filterIgnored(this.localPath, this.cf, (line) => line[0].substring(2), (files) => {
+                  this.cf = files;
+                  // If there are changed files
+                  if(this.cf.length > 0){
+                      // Clear the screen
+                      this.printTitle();
+                      if(this.config.visorSupport){
+                          this.exec("osascript -e 'set prev_ to name of (info for (path to frontmost application))' " +
+                                              "-e 'tell application \"Terminal\" to activate' " +
+                                              "-e 'delay 1' " +
+                                              "-e 'tell application prev_ to activate'");
+                      }
+                      // Display how many files were changed
+                      var message = this.cf.length + ' file'+(this.cf.length>1? 's':'')+' changed.' + '\n';
+                      this.write(message);
+                      this.showNotification(message);
 
-                    // Start uploading files as soon as function is created
-                    this.uploadAll();
-                }else{
-                    this.startChecking(); // if no changed file found, start checking again
-                }
+                      // Start uploading files as soon as function is created
+                      this.uploadAll();
+                  }else{
+                      this.startChecking('updated'); // if no changed file found, start checking again
+                  }
+                });
             }else{
-                this.startChecking(); // if no file returned, start checking again
+                this.startChecking('updated'); // if no file returned, start checking again
             }
         }
     },
@@ -406,13 +411,13 @@ var sync = {
                 this.showNotification('All files are uploaded');
             }
             this.showPrompt();
-            this.startChecking();
+            this.startChecking('updated');
         }
     },
     /**
      * Initiate the script
      */
-    init: function(){
+    init: function(mode){
         // initiate moment
         this.moment().format();
         this.getConfig();
@@ -428,8 +433,8 @@ var sync = {
         // switch to project path to run commands relatively
         process.chdir(this.localPath);
 
-        this.createMasterConection();
+        this.createMasterConection(mode);
     }
 };
 // Let the games begin!!!
-sync.init();
+sync.init('updated');

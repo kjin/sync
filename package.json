@@ -4,7 +4,8 @@
   "dependencies": {
      "moment": "latest",
      "cli-color": "latest",
-     "underscore.string": "latest"
+     "underscore.string": "latest",
+     "colors": "latest"
   },
   "license": "MIT"
 }
